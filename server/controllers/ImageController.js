@@ -1,46 +1,76 @@
 import { createCanvas, loadImage } from "canvas";
 import * as fs from "fs";
 
+const maxCanvasWidth = 640;
+const maxCanvasHeight = 480;
+const images = [
+  {
+    url: "images/devilAngel.png",
+    offsetX: (x) => x - 40,
+    offsetY: (y) => y - 140,
+    faceRatioWidth: (width) => width + 100,
+    faceRatioHeight: (height) => height,
+  },
+  {
+    url: "images/galaxy.png",
+    offsetX: (x) => x - 40,
+    offsetY: (y) => y - 140,
+    faceRatioWidth: (width) => width + 100,
+    faceRatioHeight: (height) => height,
+  },
+  {
+    url: "images/glasses.png",
+    offsetX: (x) => x + 5,
+    offsetY: (y) => y,
+    faceRatioWidth: (width) => width,
+    faceRatioHeight: (width) => width / 2,
+  },
+];
+
 class ImageController {
-  constructor(socket) {
-    this.socket = socket;
-    this.images = [
-      "images/galaxy.png",
-      "images/glasses.png",
-      "images/devilAngel.png",
-    ];
-    this.latestCapturedImageData = null;
+  constructor(userId) {
+    this.userId = userId;
+    this.latestCapturedDetection = null;
   }
 
-  async captureFrame(userImage) {
+  async captureFrame(capturedData) {
     try {
-      const imageBuffer = this.extractImageBuffer(userImage);
-      this.saveImageToFile(imageBuffer);
+      const { imageData, detection } = capturedData;
+      const imageBuffer = this.extractImageBuffer(imageData);
+      this.saveImageData(imageBuffer, detection);
 
-      const resultData = await this.processAndComposeImage(imageBuffer);
-      this.socket.emit("result", resultData);
+      const resultData = await this.processAndComposeImage(
+        imageBuffer,
+        detection
+      );
+      return resultData;
     } catch (err) {
       console.error("Error processing image:", err);
+      throw new Error("Error while processing image.");
     }
   }
 
   async generateImage() {
     try {
+      const imageData = await this.loadImageData();
       const resultData = await this.processAndComposeImage(
-        this.latestCapturedImageData
+        imageData,
+        this.latestCapturedDetection
       );
-      this.socket.emit("result", resultData);
+      return resultData;
     } catch (err) {
       console.error("Error generating image:", err);
+      throw new Error("Error while generating image.");
     }
   }
 
   async deleteImage() {
     try {
-      const previousImagePath = `userImages/${this.socket.id}.jpeg`;
-      if (fs.existsSync(previousImagePath) || !this.socket) {
-        this.deleteImageFile(previousImagePath);
-        this.socket.emit("deleteImage", previousImagePath);
+      const previousImagePath = `userImages/${this.userId}.jpeg`;
+      if (fs.existsSync(previousImagePath)) {
+        await fs.promises.unlink(previousImagePath);
+        const resultData = previousImagePath;
+        return resultData;
       } else {
         console.log("No previous image found to delete.");
       }
@@ -55,33 +85,44 @@ class ImageController {
     return Buffer.from(imageDataString, "base64");
   }
 
-  saveImageToFile(imageBuffer) {
-    const imagePath = `userImages/${this.socket.id}.jpeg`;
-    fs.writeFileSync(imagePath, imageBuffer);
-    this.latestCapturedImageData = imageBuffer;
+  async saveImageData(imageBuffer, detection) {
+    const imagePath = `userImages/${this.userId}.jpeg`;
+    await fs.promises.writeFile(imagePath, imageBuffer);
+    // Because each detection is less then 80 byte we can store in memory
+    // and because image can be more then 5mb it is better to store it in file system
+    this.latestCapturedDetection = detection;
   }
 
-  async processAndComposeImage(imageBuffer) {
-    const canvas = createCanvas(400, 400);
+  async loadImageData() {
+    const imagePath = `userImages/${this.userId}.jpeg`;
+    const fileData = await fs.promises.readFile(imagePath);
+    return fileData;
+  }
+
+  async processAndComposeImage(imageBuffer, detection) {
+    const { _x, _y, _width, _height } = detection;
+    const canvas = createCanvas(maxCanvasWidth, maxCanvasHeight);
     const ctx = canvas.getContext("2d");
 
     if (imageBuffer) {
       const capturedImage = await loadImage(imageBuffer);
-      ctx.drawImage(capturedImage, 0, 0, 400, 400);
+      ctx.drawImage(capturedImage, 0, 0, maxCanvasWidth, maxCanvasHeight);
     }
 
     const randomImageUrl =
-      this.images[Math.floor(Math.random() * this.images.length)];
+      images[Math.floor(Math.random() * images.length)].url;
     const randomImage = await loadImage(randomImageUrl);
-    ctx.drawImage(randomImage, 0, 0, 400, 200);
-
+    const { offsetX, offsetY, faceRatioWidth, faceRatioHeight } = images.find(
+      (image) => image.url === randomImageUrl
+    );
+    // TODO: To get more accurate pictures, we need to make precise
+    // and more complex calculations, which takes time
+    const x = offsetX(_x);
+    const y = offsetY(_y);
+    const w = faceRatioWidth(_width);
+    const h = faceRatioHeight(_width);
+    ctx.drawImage(randomImage, x, y, w, h);
     return canvas.toDataURL("image/jpeg");
-  }
-
-  deleteImageFile(imagePath) {
-    if (fs.existsSync(imagePath)) {
-      fs.unlinkSync(imagePath);
-    }
   }
 }
 

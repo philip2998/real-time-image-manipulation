@@ -20,40 +20,38 @@ class ImageService {
     }
   }
 
-  captureFrame(webcamRef) {
+  captureFrame(webcamRef, detections) {
     const canvas = document.createElement("canvas");
+    const { detection } = detections;
     canvas.width = webcamRef.current.videoWidth;
     canvas.height = webcamRef.current.videoHeight;
     canvas
       .getContext("2d")
       .drawImage(webcamRef.current, 0, 0, canvas.width, canvas.height);
     const imageData = canvas.toDataURL("image/jpeg");
+    const capturedData = {
+      imageData,
+      detection,
+    };
 
-    this.socket.emit("capture", imageData);
+    this.socket.emit("capture-result", capturedData);
   }
 
   generateAgain() {
-    this.socket.emit("generate");
-    this.clearImage();
+    this.socket.emit("generate-result");
   }
 
   saveImage() {
     if (this.resultImage) {
       const link = document.createElement("a");
-      link.href = this.resultImage;
+      link.href = this.resultImage.data;
       link.download = "result.jpg";
       link.click();
     }
   }
 
-  clearImage() {
-    this.resultImage = "";
-    this.showButtons = false;
-  }
-
   deleteImage() {
-    this.socket.emit("deleteImage");
-    this.clearImage();
+    this.socket.emit("deleteImage-result");
   }
 }
 
